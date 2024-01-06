@@ -17,11 +17,11 @@ use std::process::abort;
 use std::ptr::null_mut;
 use winapi::shared::ntdef::OBJECT_ATTRIBUTES;
 use winapi::um::handleapi::CloseHandle;
-use winapi::um::minwinbase::LPTR;
+
 use winapi::um::processthreadsapi::{CreateProcessAsUserW, PROCESS_INFORMATION, STARTUPINFOW};
 use winapi::um::synchapi::WaitForSingleObject;
-use winapi::um::winbase::WAIT_OBJECT_0;
-use winapi::um::winbase::{LocalAlloc, INFINITE};
+
+use winapi::um::winbase::{INFINITE};
 use winapi::um::winnt::SECURITY_DYNAMIC_TRACKING;
 use winapi::um::winnt::{
     SecurityImpersonation, TokenImpersonation, HANDLE, LUID, MAXIMUM_ALLOWED, PROCESS_ALL_ACCESS,
