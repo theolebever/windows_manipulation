@@ -3,16 +3,6 @@
 version = 3
 
 [[package]]
-name = "lol"
-version = "0.1.0"
-dependencies = [
- "ntapi",
- "rust_syscalls",
- "winapi",
- "windows",
-]
-
-[[package]]
 name = "ntapi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -109,6 +99,16 @@ name = "windows_i686_msvc"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffe5e8e31046ce6230cc7215707b816e339ff4d4d67c65dffa206fd0f7aa7b9a"
+
+[[package]]
+name = "windows_manipulation"
+version = "0.1.0"
+dependencies = [
+ "ntapi",
+ "rust_syscalls",
+ "winapi",
+ "windows",
+]
 
 [[package]]
 name = "windows_x86_64_gnu"

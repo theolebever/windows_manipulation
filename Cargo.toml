@@ -1,5 +1,5 @@
 [package]
-name = "lol"
+name = "windows_manipulation"
 version = "0.1.0"
 edition = "2021"
 
@@ -12,6 +12,14 @@ path = "src/process_injection.rs"
 [[bin]]
 name = "token_stealing"
 path = "src/token_stealing.rs"
+
+[[bin]]
+name = "hide_thread_debugger"
+path = "src/hide_thread_debugger.rs"
+
+[[bin]]
+name = "pipe_process"
+path = "src/pipe_process.rs"
 
 [dependencies]
 windows = { version = "0.52.0", features = [
@@ -27,7 +35,6 @@ windows = { version = "0.52.0", features = [
     "Win32_System_Diagnostics_Debug",
     "Win32_System_Kernel",
     "Win32_System_Threading",
-    "Win32_Foundation",
 ] }
 rust_syscalls = { git = "https://github.com/janoglezcampos/rust_syscalls", features = [
     "_INDIRECT_",
@@ -40,5 +47,7 @@ winapi = { version = "0.3.9", features = [
     "synchapi",
     "minwinbase",
     "winuser",
+    "namedpipeapi",
+    "errhandlingapi",
 ] }
 ntapi = { version = "0.4.1" }
