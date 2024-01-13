@@ -6,7 +6,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::ptr::{null, null_mut};
 use winapi::shared::minwindef::{DWORD, FALSE, LPVOID, TRUE};
 use winapi::shared::ntdef::HANDLE;
-use winapi::um::fileapi::{ReadFile};
+use winapi::um::fileapi::ReadFile;
 use winapi::um::handleapi::{CloseHandle, SetHandleInformation};
 use winapi::um::minwinbase::SECURITY_ATTRIBUTES;
 use winapi::um::namedpipeapi::CreatePipe;
@@ -16,6 +16,18 @@ use winapi::um::winbase::HANDLE_FLAG_INHERIT;
 use winapi::um::winbase::{CREATE_UNICODE_ENVIRONMENT, INFINITE, STARTF_USESTDHANDLES};
 
 fn main() -> io::Result<()> {
+    // Get the arguments from the command line
+    let args: Vec<String> = std::env::args().collect();
+
+    // Check if the number of arguments is correct
+    if args.len() != 2 {
+        eprintln!("Usage: {} <command>", args[0]);
+        return Ok(());
+    }
+
+    // Concatenate the arguments into a single string
+    let command = args[1..].join(" ");
+
     unsafe {
         let mut sa_attr: SECURITY_ATTRIBUTES = std::mem::zeroed();
         sa_attr.nLength = std::mem::size_of::<SECURITY_ATTRIBUTES>() as DWORD;
@@ -49,7 +61,7 @@ fn main() -> io::Result<()> {
         si_start_info.hStdOutput = h_child_stdout_wr;
         si_start_info.dwFlags |= STARTF_USESTDHANDLES;
 
-        let mut cmd = OsStr::new("powershell.exe -Command \"Get-Process\"")
+        let mut cmd = OsStr::new(format!("powershell.exe -Command \"{}\"", command).as_str())
             .encode_wide()
             .chain(Some(0))
             .collect::<Vec<u16>>();
